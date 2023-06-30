@@ -1,9 +1,10 @@
 mod utils;
 
-use std::{rc::Rc};
+use std::rc::Rc;
 
 use tl_util::State;
 use wasm_bindgen::prelude::*;
+use web_sys::Event;
 
 // When the `wee_alloc` feature is enabled, use `wee_alloc` as the global
 // allocator.
@@ -44,7 +45,9 @@ fn run() -> Result<(), JsValue> {
     }
 
     impl Potato {
-        pub fn p(self: Rc<Self>) {}
+        pub fn inc(self: Rc<Self>) {
+            self.value.value_mut().add(1);
+        }
     }
 
     tl_core::load! {
@@ -53,20 +56,26 @@ fn run() -> Result<(), JsValue> {
         div (class: [container]) {
             "Hello {$value}"
         }
+
+        button (click: { log("Hello") }) {
+            "Count"
+        }
     };
 
+    // let e = document.create_element("button")?;
+    // e.set_text_content(Some("bruh"));
+    // let cb: Closure<dyn FnMut(Event)> = Closure::new(move |_| {
+    //     log("Hi");
+    // });
+    // e.add_event_listener_with_callback("click", &cb.as_ref().unchecked_ref())?;
+    // body.append_child(&e)?;
+    // let n = document.create_text_node("datfjdsklfa");
+    // // n.clone();
+    // cb.forget();
+
     let p = Rc::new(Potato { value: 0.into() });
-    let rp = p.clone();
+    let _self = Rc::clone(&p);
     p.on_init(Rc::new(document), &body)?;
-
-    let cb = Closure::new(move || {
-        rp.value.value_mut().add(1);
-        rp.value.value_mut().rem(5);
-    });
-
-    setInterval(&cb, 500);
-
-    cb.forget();
 
     Ok(())
 }

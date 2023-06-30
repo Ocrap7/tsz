@@ -1,12 +1,19 @@
 #![feature(round_char_boundary)]
 #![feature(iter_intersperse)]
 
+use std::collections::HashSet;
+
 use proc_macro2::{Span, TokenStream};
+use punc::FnBind;
 use quote::{quote, ToTokens};
 use syn::{parse_macro_input, Ident};
 
 mod kw {
     syn::custom_keyword!(declare);
+}
+
+mod punc {
+    syn::custom_punctuation!(FnBind, @);
 }
 
 enum ElementBody {
@@ -45,10 +52,57 @@ impl syn::parse::Parse for ElementBody {
     }
 }
 
+enum Value {
+    FnBind {
+        bind_tok: punc::FnBind,
+        ident: syn::Ident,
+    },
+    Expr(syn::Expr),
+    Stmt {
+        group: syn::token::Brace,
+        stmt: syn::Expr,
+    },
+}
+
+impl Value {
+    pub fn as_fn_bind(&self) -> &syn::Ident {
+        match self {
+            Self::FnBind { ident, .. } => ident,
+            _ => panic!("Expected fn bind"),
+        }
+    }
+
+    pub fn as_expr(&self) -> &syn::Expr {
+        match self {
+            Self::Expr(expr) => expr,
+            _ => panic!("Expected Expr"),
+        }
+    }
+}
+
+impl syn::parse::Parse for Value {
+    fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
+        if input.peek(punc::FnBind) {
+            Ok(Value::FnBind {
+                bind_tok: input.parse()?,
+                ident: input.parse()?,
+            })
+        } else if input.peek(syn::token::Brace) {
+            let content;
+            Ok(Value::Stmt {
+                group: syn::braced!(content in input),
+                stmt: content.parse()?,
+            })
+        } else {
+            Ok(Value::Expr(input.parse()?))
+        }
+    }
+}
+
 struct KeyValue {
     key: Ident,
     colon: syn::Token![:],
-    value: syn::Expr,
+    value: Value,
 }
 
 impl syn::parse::Parse for KeyValue {
@@ -188,6 +242,60 @@ fn convert_expr_to_attr(expr: &syn::Expr) -> String {
     }
 }
 
+fn get_event_from_stmt(
+    stmt: &syn::Expr,
+    event_name: &syn::LitStr,
+    element: &syn::Ident,
+) -> TokenStream {
+    quote! {
+        {
+            let _self = self.clone();
+            let cb: Closure<dyn FnMut(Event)> = Closure::new(move |_| {
+                let _self = Rc::clone(&_self);
+                {
+                    #stmt;
+                }
+            });
+
+            #element.add_event_listener_with_callback(#event_name, &cb.as_ref().unchecked_ref())?;
+            cb.forget();
+        }
+    }
+}
+
+fn get_event(
+    ident: &syn::Ident,
+    event_name: &syn::LitStr,
+    element: &syn::Ident,
+    tok_span: Span,
+) -> TokenStream {
+    let path_string = ident.to_string();
+    let func_name = &path_string[..];
+    let func_ident = syn::Ident::new(func_name, Span::call_site());
+
+    let dot = syn::token::Dot { spans: [tok_span] };
+
+    quote! {
+        {
+            let _self = self.clone();
+            let cb: Closure<dyn FnMut(Event)> = Closure::new(move |_| {
+                let _self = Rc::clone(&_self);
+                _self #dot #func_ident()
+            });
+
+            #element.add_event_listener_with_callback(#event_name, &cb.as_ref().unchecked_ref())?;
+            cb.forget();
+        }
+    }
+}
+
+// const
+lazy_static::lazy_static! {
+    static ref EVENTS: HashSet<&'static str> = HashSet::from_iter([
+        "click"
+    ]);
+}
+
 fn walk_elements(index: &mut usize, parent: &Ident, element: &Element) -> TokenStream {
     let mut tokens = TokenStream::new();
 
@@ -218,11 +326,33 @@ fn walk_elements(index: &mut usize, parent: &Ident, element: &Element) -> TokenS
                 if let Some(args) = arguments {
                     for arg in &args.arguments {
                         let name = arg.key.to_string();
-                        let string = convert_expr_to_attr(&arg.value);
 
-                        tokens.extend(quote! {
-                            #ident.set_attribute(#name, #string)?;
-                        });
+                        if EVENTS.contains(name.as_str()) {
+                            let name = syn::LitStr::new(name.as_str(), Span::call_site());
+
+                            match &arg.value {
+                                Value::FnBind {
+                                    ident: bind_ident,
+                                    bind_tok,
+                                } => {
+                                    let event_value =
+                                        get_event(bind_ident, &name, &ident, bind_tok.spans[0]);
+                                    tokens.extend(event_value);
+                                }
+                                Value::Stmt { stmt, .. } => {
+                                    let event_value =
+                                        get_event_from_stmt(stmt, &name, &ident);
+                                    tokens.extend(event_value);
+                                }
+                                _ => panic!("Only Expected Function bind at the moment"),
+                            }
+                        } else {
+                            let string = convert_expr_to_attr(arg.value.as_expr());
+
+                            tokens.extend(quote! {
+                                #ident.set_attribute(#name, #string)?;
+                            });
+                        }
                     }
                 }
             };
@@ -296,50 +426,55 @@ fn walk_elements(index: &mut usize, parent: &Ident, element: &Element) -> TokenS
 
             let string = syn::LitStr::new(&buf, lit_str.span());
 
-            let mut bind = None;
+            let bind = {
+                let node_name = format!("_n{}", *index);
+                *index += 1;
+
+                let node_name = syn::Ident::new(&node_name, Span::call_site());
+                node_name
+            };
+
             let mut subscribers = Vec::new();
             let mut vars = Vec::new();
+            let mut re_fmt_vars = Vec::new();
 
             for value in &var_buf {
                 if value.starts_with('$') {
-                    if bind.is_none() {
-                        let node_name = format!("_n{}", *index);
-                        *index += 1;
-
-                        let node_name = syn::Ident::new(&node_name, Span::call_site());
-                        bind = Some(node_name);
-                    }
-
                     let var_name = syn::Ident::new(&value[1..], Span::call_site());
-
                     vars.push(quote! {self.#var_name.value()});
+
+                    re_fmt_vars.push(quote! {_self.#var_name.value()});
                 } else {
                     let var_name = syn::Ident::new(value, Span::call_site());
                     vars.push(quote! {#var_name});
+                    re_fmt_vars.push(quote! {#var_name});
                 }
             }
 
             let format = quote! { let content = format!(#string, #(#vars),*); };
+            let re_format = quote! { let content = format!(#string, #(#re_fmt_vars),*); };
 
             for value in &var_buf {
                 if value.starts_with('$') {
                     let var_name = syn::Ident::new(&value[1..], Span::call_site());
 
-                    if let Some(name) = &bind {
-                        subscribers.push(quote! {
-                            let _self = self.clone();
-                            _self.#var_name.subscribe(move |value| {
-                                #format
-                                #name.set_text_content(Some(&content));
-                            });
+                    let new_name =
+                        syn::Ident::new(&format!("{}_clone", bind.to_string()), Span::call_site());
+
+                    subscribers.push(quote! {
+                        let _self = self.clone();
+                        let #new_name = #bind.clone();
+                        self.#var_name.subscribe(move |value| {
+                            #re_format
+                            #new_name.set_text_content(Some(&content));
                         });
-                    }
+                    });
                 }
             }
 
             tokens.extend(quote! {
                 #format
-                let #bind = Box::new(document.create_text_node(&content));
+                let #bind = document.create_text_node(&content);
                 { #parent.append_child(&#bind.get_root_node())?; }
                 #(#subscribers)*
             });
@@ -385,7 +520,7 @@ pub fn load(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
                 // let Self { value } = self;
                 let __body = document.body().expect("Unable to get document body");
 
-                #(#tokens)*
+                #(#tokens);*
 
                 Ok(())
             }
