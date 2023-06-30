@@ -1,0 +1,5 @@
+declare ViewName;
+
+div {
+    Hello
+}
