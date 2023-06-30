@@ -179,7 +179,7 @@ fn convert_expr_to_attr(expr: &syn::Expr) -> String {
         syn::Expr::Array(arr) => arr
             .elems
             .iter()
-            .map(|elem| convert_expr_to_attr(elem))
+            .map(convert_expr_to_attr)
             .intersperse(" ".to_string())
             .collect(),
         syn::Expr::Lit(lit) => lit.to_token_stream().to_string(),
@@ -229,7 +229,7 @@ fn walk_elements(index: &mut usize, parent: &Ident, element: &Element) -> TokenS
 
             match &body {
                 ElementBody::Elements { brace_token, body } => {
-                    if body.len() != 0 {
+                    if !body.is_empty() {
                         brace_token.surround(&mut tokens, |body_tokens| {
                             for element in body {
                                 let sub_tokens = walk_elements(index, &ident, element);
@@ -252,8 +252,8 @@ fn walk_elements(index: &mut usize, parent: &Ident, element: &Element) -> TokenS
             let mut buf = String::new();
             let mut var_buf = Vec::new();
 
-            for chunk in string.split_inclusive("}") {
-                let mut text_and_pattern = chunk.split_inclusive("{");
+            for chunk in string.split_inclusive('}') {
+                let mut text_and_pattern = chunk.split_inclusive('{');
                 let text = text_and_pattern.next().unwrap();
                 buf.push_str(text);
                 count += text.len();
@@ -358,7 +358,7 @@ pub fn load(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
         ..
     } = parse_macro_input!(input as View);
 
-    let struct_token = syn::token::Struct {
+    let _struct_token = syn::token::Struct {
         span: decl_token.span,
     };
 

@@ -1,7 +1,6 @@
 mod refs;
 use std::{
-    cell::{Cell, Ref, RefCell, RefMut},
-    ops::DerefMut,
+    cell::{Cell, RefCell},
 };
 
 pub use refs::*;

@@ -1,6 +1,6 @@
 mod utils;
 
-use std::{cell::RefCell, rc::Rc, time::Duration};
+use std::{rc::Rc};
 
 use tl_util::State;
 use wasm_bindgen::prelude::*;
