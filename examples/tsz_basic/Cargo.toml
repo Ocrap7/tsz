@@ -1,5 +1,5 @@
 [package]
-name = "tl_wrapper"
+name = "tsz_basic"
 version = "0.1.0"
 authors = ["Oliver Clarke <oliverhenryc@gmail.com>"]
 edition = "2018"
@@ -11,8 +11,7 @@ crate-type = ["cdylib", "rlib"]
 default = ["console_error_panic_hook"]
 
 [dependencies]
-tl_core = { path = "../tl_core" }
-tl_util = { path = "../tl_util" }
+tsz = { path = "../../tsz" }
 wasm-bindgen = "0.2.63"
 
 # The `console_error_panic_hook` crate provides better debugging of panics by

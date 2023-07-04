@@ -10,6 +10,8 @@ pub mod format;
 
 pub mod html;
 
+pub use tsz_macros::*;
+
 #[doc(hidden)]
 #[macro_export]
 macro_rules! __util_format_args {

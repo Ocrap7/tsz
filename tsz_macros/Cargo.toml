@@ -1,5 +1,5 @@
 [package]
-name = "tl_core"
+name = "tsz_macros"
 version = "0.1.0"
 edition = "2021"
 
@@ -9,8 +9,6 @@ edition = "2021"
 proc-macro = true
 
 [dependencies]
-tl_util = { path = "../tl_util" }
-
 log = { version = "*", features = ["std"] }
 tower-lsp = "*"
 pollster = "*"

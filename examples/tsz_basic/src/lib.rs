@@ -2,7 +2,11 @@ mod utils;
 
 use std::rc::Rc;
 
+<<<<<<< HEAD:tl_wrapper/src/lib.rs
 use views::MyView;
+=======
+use tsz::State;
+>>>>>>> organize project:examples/tsz_basic/src/lib.rs
 use wasm_bindgen::prelude::*;
 
 mod views;

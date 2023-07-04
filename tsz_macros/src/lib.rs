@@ -1,6 +1,3 @@
-#![feature(round_char_boundary)]
-#![feature(iter_intersperse)]
-
 use std::collections::HashSet;
 
 use proc_macro2::{Span, TokenStream};
@@ -132,7 +129,7 @@ impl syn::parse::Parse for Arguments {
         let arguments;
         Ok(Arguments {
             parens: syn::parenthesized!(arguments in input),
-            arguments: arguments.parse_terminated(KeyValue::parse, syn::Token![,])?,
+            arguments: arguments.parse_terminated(KeyValue::parse)?,
         })
     }
 }
@@ -242,8 +239,7 @@ fn convert_expr_to_attr(expr: &syn::Expr) -> String {
             .elems
             .iter()
             .map(convert_expr_to_attr)
-            .intersperse(" ".to_string())
-            .collect(),
+            .collect::<Vec<_>>().join(" "),
         syn::Expr::Lit(lit) => lit.to_token_stream().to_string(),
         syn::Expr::Path(p) => p.to_token_stream().to_string(),
         _ => "".to_string(),
@@ -608,7 +604,7 @@ pub fn view(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
         use web_sys::Event;
 
         #impl_tok #name {
-            pub fn on_init(self: Rc<Self>, document: Rc<tl_util::html::Document>, parent: &tl_util::html::Element) -> Result<(), JsValue> {
+            pub fn on_init(self: Rc<Self>, document: Rc<tsz::html::Document>, parent: &tsz::html::Element) -> Result<(), JsValue> {
                 // let Self { value } = self;
                 let __body = document.body().expect("Unable to get document body");
 
