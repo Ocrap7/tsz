@@ -2,9 +2,10 @@ mod utils;
 
 use std::rc::Rc;
 
-use tl_util::State;
+use views::MyView;
 use wasm_bindgen::prelude::*;
-use web_sys::Event;
+
+mod views;
 
 // When the `wee_alloc` feature is enabled, use `wee_alloc` as the global
 // allocator.
@@ -33,47 +34,8 @@ fn run() -> Result<(), JsValue> {
     let window = web_sys::window().expect("no global `window` exists");
     let document = window.document().expect("should have a document on window");
     let body = document.body().expect("document should have a body");
-    // let e = body.insert_adjacent_element(where_, element)?.unwrap();
-    // let tn = document.create_text_node("fsdf");
-    // body.append_child(&tn.get_root_node());
-    // tn.
-    // document.insert_adja
-    // body.
 
-    struct Potato {
-        value: State<u64>,
-    }
-
-    impl Potato {
-        pub fn inc(self: Rc<Self>) {
-            self.value.value_mut().add(1);
-        }
-    }
-
-    tl_core::load! {
-        declare Potato;
-
-        div (class: [container]) {
-            "Hello {$value}"
-        }
-
-        button (click: { log("Hello") }) {
-            "Count"
-        }
-    };
-
-    // let e = document.create_element("button")?;
-    // e.set_text_content(Some("bruh"));
-    // let cb: Closure<dyn FnMut(Event)> = Closure::new(move |_| {
-    //     log("Hi");
-    // });
-    // e.add_event_listener_with_callback("click", &cb.as_ref().unchecked_ref())?;
-    // body.append_child(&e)?;
-    // let n = document.create_text_node("datfjdsklfa");
-    // // n.clone();
-    // cb.forget();
-
-    let p = Rc::new(Potato { value: 0.into() });
+    let p = Rc::new(MyView::new());
     let _self = Rc::clone(&p);
     p.on_init(Rc::new(document), &body)?;
 
