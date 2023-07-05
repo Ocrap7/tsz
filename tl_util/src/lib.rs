@@ -1,6 +1,7 @@
 mod refs;
 use std::{
     cell::{Cell, RefCell},
+    rc::Rc,
 };
 
 pub use refs::*;
@@ -17,11 +18,11 @@ macro_rules! __util_format_args {
     };
 }
 
-pub struct StateRefMut<'a, T>(pub &'a State<T>);
+pub struct StateRefMut<'a, T>(pub &'a InnerState<T>);
 
 macro_rules! impl_op {
     ($tr:ident, $name:ident) => {
-        impl<T: std::ops::$tr<Output = T>  + Copy> StateRefMut<'_, T> {
+        impl<T: std::ops::$tr<Output = T> + Copy> StateRefMut<'_, T> {
             pub fn $name(self, rhs: T) {
                 let new_value = self.0.value.get().$name(rhs);
                 self.0.value.set(new_value);
@@ -52,12 +53,12 @@ impl<'a, T: std::ops::Add<Output = T> + Copy> std::ops::AddAssign<T> for StateRe
     }
 }
 
-pub struct State<T> {
+pub struct InnerState<T> {
     pub value: Cell<T>,
     subscribers: RefCell<Vec<Box<dyn FnMut(&T)>>>,
 }
 
-impl<T: Copy> State<T> {
+impl<T: Copy> InnerState<T> {
     pub fn subscribe(&self, f: impl FnMut(&T) + 'static) {
         let mut subs = self.subscribers.borrow_mut();
         subs.push(Box::new(f));
@@ -77,7 +78,6 @@ impl<T: Copy> State<T> {
     }
 
     pub fn value_mut(&self) -> StateRefMut<T> {
-        // self.value.set(val)
         StateRefMut(self)
     }
 
@@ -87,11 +87,43 @@ impl<T: Copy> State<T> {
     // }
 }
 
-impl<T> From<T> for State<T> {
+impl<T> From<T> for InnerState<T> {
     fn from(value: T) -> Self {
-        State {
+        InnerState {
             value: Cell::new(value),
             subscribers: RefCell::new(Vec::new()),
         }
+    }
+}
+
+pub struct State<T>(Rc<InnerState<T>>);
+
+impl<T> State<T> {
+    pub fn bind(&self) -> Binding<T> {
+        Binding(self.0.clone())
+    }
+}
+
+impl<T> std::ops::Deref for State<T> {
+    type Target = InnerState<T>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<T> From<T> for State<T> {
+    fn from(value: T) -> Self {
+        State(Rc::new(value.into()))
+    }
+}
+
+pub struct Binding<T>(Rc<InnerState<T>>);
+
+impl<T> std::ops::Deref for Binding<T> {
+    type Target = InnerState<T>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
     }
 }
