@@ -4,9 +4,11 @@
 use std::collections::HashSet;
 
 use proc_macro2::{Span, TokenStream};
-use punc::FnBind;
 use quote::{quote, ToTokens};
-use syn::{parse_macro_input, Ident};
+use syn::{parse_macro_input, BinOp, Ident};
+
+mod expr;
+mod syn_macros;
 
 mod kw {
     syn::custom_keyword!(declare);
@@ -57,10 +59,10 @@ enum Value {
         bind_tok: punc::FnBind,
         ident: syn::Ident,
     },
-    Expr(syn::Expr),
+    Expr(expr::CoreExpr),
     Stmt {
         group: syn::token::Brace,
-        stmt: syn::Expr,
+        stmt: expr::CoreExpr,
     },
 }
 
@@ -72,7 +74,7 @@ impl Value {
         }
     }
 
-    pub fn as_expr(&self) -> &syn::Expr {
+    pub fn as_expr(&self) -> &expr::CoreExpr {
         match self {
             Self::Expr(expr) => expr,
             _ => panic!("Expected Expr"),
@@ -100,18 +102,23 @@ impl syn::parse::Parse for Value {
 }
 
 struct KeyValue {
-    key: Ident,
-    colon: syn::Token![:],
-    value: Value,
+    key: Option<(Ident, syn::Token![:])>,
+    value: expr::CoreExpr,
 }
 
 impl syn::parse::Parse for KeyValue {
     fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
-        Ok(KeyValue {
-            key: input.parse()?,
-            colon: input.parse()?,
-            value: input.parse()?,
-        })
+        if input.peek2(syn::Token![:]) {
+            Ok(KeyValue {
+                key: Some((input.parse()?, input.parse()?)),
+                value: input.parse()?,
+            })
+        } else {
+            Ok(KeyValue {
+                key: None,
+                value: input.parse()?,
+            })
+        }
     }
 }
 
@@ -187,6 +194,7 @@ impl syn::parse::Parse for Element {
             // let raw_text = span.clone().source_text().unwrap();
 
             // let string = syn::LitStr::new(&ts.to_string(), span);
+            // syn::parse_quote!()
 
             Ok(Element::Text(input.parse()?))
         }
@@ -222,7 +230,7 @@ impl syn::parse::Parse for View {
 
 fn is_pascal(input: &str) -> bool {
     if let Some('A'..='Z') = input.chars().next() {
-        return input.contains('_');
+        return !input.contains('_');
     }
 
     false
@@ -242,18 +250,77 @@ fn convert_expr_to_attr(expr: &syn::Expr) -> String {
     }
 }
 
+fn op_to_func_name(op: &BinOp) -> syn::Ident {
+    let name = match op {
+        BinOp::AddAssign(_) => "add",
+        BinOp::SubAssign(_) => "sub",
+        BinOp::MulAssign(_) => "mul",
+        BinOp::DivAssign(_) => "div",
+        BinOp::RemAssign(_) => "rem",
+        BinOp::ShrAssign(_) => "shr",
+        BinOp::ShlAssign(_) => "shl",
+        BinOp::BitAndAssign(_) => "bitand",
+        BinOp::BitOrAssign(_) => "bitor",
+        BinOp::BitXorAssign(_) => "bitxor",
+        _ => panic!("Unsupported operator"),
+    };
+
+    syn::Ident::new(name, Span::call_site())
+}
+
+fn generate_expr(expr: &expr::CoreExpr, view_param: bool) -> TokenStream {
+    match expr {
+        expr::CoreExpr::Expr(ex) => ex.to_token_stream(),
+        expr::CoreExpr::FnBind(binding) => {
+            // dot = Some(syn::token::Dot { spans: binding.bind_token.spans });
+            let var_name = &binding.ident;
+
+            quote! {}
+        }
+        expr::CoreExpr::StateBind(binding) => {
+            let dot = Some(syn::token::Dot {
+                spans: binding.bind_token.spans,
+            });
+            let var_name = &binding.ident;
+
+            if view_param {
+                quote! { self #dot #var_name.bind() }
+            } else {
+                quote! { _self #dot #var_name.value() }
+            }
+        }
+        expr::CoreExpr::Assignment(expr::Assignment { left, op, right }) => {
+            match (left.as_ref(), right.as_ref()) {
+                (expr::CoreExpr::StateBind(bind), expr::CoreExpr::Expr(exp)) => {
+                    let op = op_to_func_name(op);
+                    let var_name = &bind.ident;
+
+                    quote! { _self.#var_name.value_mut().#op(#exp) }
+                }
+                _ => panic!("Unexpected assignment"),
+            }
+        }
+        _ => panic!("Unexpected expression"),
+        // expr::CoreExpr::Closure(expr::Closure { expr, .. }) => {
+        //     get_event_from_stmt(expr, &name, &ident)
+        // }
+    }
+}
+
 fn get_event_from_stmt(
-    stmt: &syn::Expr,
+    stmt: &expr::CoreExpr,
     event_name: &syn::LitStr,
     element: &syn::Ident,
 ) -> TokenStream {
+    let expr = generate_expr(stmt, false);
+
     quote! {
         {
             let _self = self.clone();
             let cb: Closure<dyn FnMut(Event)> = Closure::new(move |_| {
                 let _self = Rc::clone(&_self);
                 {
-                    #stmt;
+                    #expr;
                 }
             });
 
@@ -272,6 +339,7 @@ fn get_event(
     let path_string = ident.to_string();
     let func_name = &path_string[..];
     let func_ident = syn::Ident::new(func_name, Span::call_site());
+    // syn::LitChar::new(value, span);
 
     let dot = syn::token::Dot { spans: [tok_span] };
 
@@ -314,9 +382,22 @@ fn walk_elements(index: &mut usize, parent: &Ident, element: &Element) -> TokenS
             if element.is_view() {
                 let struct_name = &name;
 
+                let args = if let Some(args) = arguments {
+                    let mut params = Vec::new();
+                    for arg in &args.arguments {
+                        params.push(generate_expr(&arg.value, true))
+                    }
+                    params
+                } else {
+                    Vec::new()
+                };
+
                 tokens.extend(quote! {
-                    #let_token #ident = #struct_name {};
+                    #let_token #ident = Rc::new(#struct_name::new(#(#args),*));
+                    #ident.on_init(document.clone(), &#parent)?;
                 });
+
+                return tokens;
             } else {
                 let tag = name.to_string();
                 tokens.extend(quote! {
@@ -325,33 +406,38 @@ fn walk_elements(index: &mut usize, parent: &Ident, element: &Element) -> TokenS
 
                 if let Some(args) = arguments {
                     for arg in &args.arguments {
-                        let name = arg.key.to_string();
+                        let name = arg.key.as_ref().expect("Expected named argument for element").0.to_string();
 
                         if EVENTS.contains(name.as_str()) {
                             let name = syn::LitStr::new(name.as_str(), Span::call_site());
 
                             match &arg.value {
-                                Value::FnBind {
+                                expr::CoreExpr::FnBind(expr::FnBind {
+                                    bind_token,
                                     ident: bind_ident,
-                                    bind_tok,
-                                } => {
+                                }) => {
                                     let event_value =
-                                        get_event(bind_ident, &name, &ident, bind_tok.spans[0]);
+                                        get_event(bind_ident, &name, &ident, bind_token.spans[0]);
                                     tokens.extend(event_value);
                                 }
-                                Value::Stmt { stmt, .. } => {
-                                    let event_value =
-                                        get_event_from_stmt(stmt, &name, &ident);
+                                expr::CoreExpr::Closure(expr::Closure { expr, .. }) => {
+                                    let event_value = get_event_from_stmt(expr, &name, &ident);
                                     tokens.extend(event_value);
                                 }
                                 _ => panic!("Only Expected Function bind at the moment"),
                             }
                         } else {
-                            let string = convert_expr_to_attr(arg.value.as_expr());
+                            // let expr = arg.value.as_expr();
+                            match &arg.value {
+                                expr::CoreExpr::Expr(ex) => {
+                                    let string = convert_expr_to_attr(ex);
 
-                            tokens.extend(quote! {
-                                #ident.set_attribute(#name, #string)?;
-                            });
+                                    tokens.extend(quote! {
+                                        #ident.set_attribute(#name, #string)?;
+                                    });
+                                }
+                                _ => panic!("Unexpected expression for attribute"),
+                            }
                         }
                     }
                 }
@@ -485,7 +571,7 @@ fn walk_elements(index: &mut usize, parent: &Ident, element: &Element) -> TokenS
 }
 
 #[proc_macro]
-pub fn load(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+pub fn view(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let View {
         decl_token,
         name,
@@ -515,6 +601,12 @@ pub fn load(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     };
 
     let output = quote! {
+        use std::rc::Rc;
+
+        use tl_util::State;
+        use wasm_bindgen::prelude::*;
+        use web_sys::Event;
+
         #impl_tok #name {
             pub fn on_init(self: Rc<Self>, document: Rc<tl_util::html::Document>, parent: &tl_util::html::Element) -> Result<(), JsValue> {
                 // let Self { value } = self;
