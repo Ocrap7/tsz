@@ -813,6 +813,7 @@ dependencies = [
  "colored",
  "linked-hash-map",
  "tsz_macros",
+ "wasm-bindgen",
  "web-sys",
 ]
 

@@ -11,6 +11,8 @@ pub mod format;
 pub mod html;
 
 pub use tsz_macros::*;
+pub mod views;
+pub mod config;
 
 #[doc(hidden)]
 #[macro_export]
