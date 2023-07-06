@@ -14,7 +14,7 @@ impl MyView {
     }
 }
 
-tl_core::view! {
+tsz::view! {
     declare MyView;
 
     div (class: [container]) {

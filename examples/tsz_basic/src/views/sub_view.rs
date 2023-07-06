@@ -1,4 +1,4 @@
-use tl_util::Binding;
+use tsz::Binding;
 
 pub struct SubView {
     sub_value: Binding<u64>,
@@ -12,7 +12,7 @@ impl SubView {
     }
 }
 
-tl_core::view! {
+tsz::view! {
     declare SubView;
 
     div {

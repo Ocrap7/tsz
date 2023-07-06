@@ -51,16 +51,16 @@ impl Parse for CoreExpr {
 
 fn is_op_assign(op: &BinOp) -> bool {
     match op {
-        BinOp::AddAssign(_)
-        | BinOp::SubAssign(_)
-        | BinOp::MulAssign(_)
-        | BinOp::DivAssign(_)
-        | BinOp::RemAssign(_)
-        | BinOp::ShlAssign(_)
-        | BinOp::ShrAssign(_)
-        | BinOp::BitOrAssign(_)
-        | BinOp::BitAndAssign(_)
-        | BinOp::BitXorAssign(_) => true,
+        BinOp::AddEq(_)
+        | BinOp::SubEq(_)
+        | BinOp::MulEq(_)
+        | BinOp::DivEq(_)
+        | BinOp::RemEq(_)
+        | BinOp::ShlEq(_)
+        | BinOp::ShrEq(_)
+        | BinOp::BitOrEq(_)
+        | BinOp::BitAndEq(_)
+        | BinOp::BitXorEq(_) => true,
         _ => false,
     }
 }

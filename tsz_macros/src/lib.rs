@@ -248,16 +248,16 @@ fn convert_expr_to_attr(expr: &syn::Expr) -> String {
 
 fn op_to_func_name(op: &BinOp) -> syn::Ident {
     let name = match op {
-        BinOp::AddAssign(_) => "add",
-        BinOp::SubAssign(_) => "sub",
-        BinOp::MulAssign(_) => "mul",
-        BinOp::DivAssign(_) => "div",
-        BinOp::RemAssign(_) => "rem",
-        BinOp::ShrAssign(_) => "shr",
-        BinOp::ShlAssign(_) => "shl",
-        BinOp::BitAndAssign(_) => "bitand",
-        BinOp::BitOrAssign(_) => "bitor",
-        BinOp::BitXorAssign(_) => "bitxor",
+        BinOp::AddEq(_) => "add",
+        BinOp::SubEq(_) => "sub",
+        BinOp::MulEq(_) => "mul",
+        BinOp::DivEq(_) => "div",
+        BinOp::RemEq(_) => "rem",
+        BinOp::ShrEq(_) => "shr",
+        BinOp::ShlEq(_) => "shl",
+        BinOp::BitAndEq(_) => "bitand",
+        BinOp::BitOrEq(_) => "bitor",
+        BinOp::BitXorEq(_) => "bitxor",
         _ => panic!("Unsupported operator"),
     };
 
@@ -599,7 +599,7 @@ pub fn view(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let output = quote! {
         use std::rc::Rc;
 
-        use tl_util::State;
+        use tsz::State;
         use wasm_bindgen::prelude::*;
         use web_sys::Event;
 
