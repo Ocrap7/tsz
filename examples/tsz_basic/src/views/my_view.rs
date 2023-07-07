@@ -1,17 +1,15 @@
 use super::sub_view::*;
+use tsz::views::*;
 
 pub struct MyView {
-    value: State<u64>,
+    value: State<bool>,
 }
 
 impl MyView {
     pub fn new() -> MyView {
-        MyView { value: 0.into() }
+        MyView { value: false.into() }
     }
 
-    pub fn inc(self: Rc<Self>) {
-        self.value.value_mut().add(2)
-    }
 }
 
 tsz::view! {
@@ -21,13 +19,13 @@ tsz::view! {
         "The count is {$value}"
 
         div (class: [center]) {
-            button (click: { $value += 1 }) {
+            button (click: { $value = true }) {
                 "Count"
             }
         }
     }
 
-    div {
-        SubView($value);
+    If($value) {
+        "Is true"
     }
 }

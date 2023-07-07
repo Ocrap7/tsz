@@ -36,8 +36,8 @@ fn run() -> Result<(), JsValue> {
     let body = document.body().expect("document should have a body");
 
     let p = Rc::new(MyView::new());
-    let _self = Rc::clone(&p);
-    p.on_init(Rc::new(document), &body)?;
+    let _selfc = Rc::clone(&p);
+    p.on_init(Rc::new(document), &body, None)?;
 
     Ok(())
 }

@@ -48,6 +48,14 @@ impl_op!(BitXor, bitxor);
 impl_op!(Shl, shl);
 impl_op!(Shr, shr);
 
+impl<T: Copy> StateRefMut<'_, T> {
+    pub fn assign(self, rhs: T) {
+        self.0.value.set(rhs);
+
+        self.0.publish();
+    }
+}
+
 impl<'a, T: std::ops::Add<Output = T> + Copy> std::ops::AddAssign<T> for StateRefMut<'a, T> {
     fn add_assign(&mut self, rhs: T) {
         let new_value = self.0.value.get() + rhs;

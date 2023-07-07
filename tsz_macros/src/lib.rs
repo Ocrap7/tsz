@@ -1,8 +1,9 @@
 use std::collections::HashSet;
 
+use expr::BinOp;
 use proc_macro2::{Span, TokenStream};
 use quote::{quote, ToTokens};
-use syn::{parse_macro_input, BinOp, Ident};
+use syn::{parse_macro_input, Ident};
 
 mod expr;
 mod syn_macros;
@@ -141,6 +142,10 @@ enum Element {
         body: ElementBody,
     },
     Text(syn::LitStr),
+    Include {
+        token: syn::Token![#],
+        name: syn::Ident,
+    },
 }
 
 impl Element {
@@ -171,6 +176,11 @@ impl syn::parse::Parse for Element {
                 arguments,
                 body: input.parse()?,
             })
+        } else if input.peek(syn::Token![#]) {
+            Ok(Element::Include {
+                token: input.parse()?,
+                name: input.parse()?,
+            })
         } else {
             // For some reason, calling source_text invalidates span
             // let span = input.cursor().span();
@@ -200,7 +210,9 @@ impl syn::parse::Parse for Element {
 
 struct View {
     decl_token: kw::declare,
+    generics: Option<syn::Generics>,
     name: syn::Ident,
+    generic_params: Option<syn::AngleBracketedGenericArguments>,
     semi: syn::Token![;],
 
     elements: Vec<Element>,
@@ -208,9 +220,27 @@ struct View {
 
 impl syn::parse::Parse for View {
     fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
+        let decl_token = input.parse()?;
+
+        let generics = if input.peek(syn::Token![<]) {
+            Some(input.parse()?)
+        } else {
+            None
+        };
+
+        let name = input.parse()?;
+
+        let generic_params= if input.peek(syn::Token![<]) {
+            Some(input.parse()?)
+        } else {
+            None
+        };
+
         Ok(View {
-            decl_token: input.parse()?,
-            name: input.parse()?,
+            decl_token,
+            generics,
+            name,
+            generic_params,
             semi: input.parse()?,
 
             elements: {
@@ -239,7 +269,8 @@ fn convert_expr_to_attr(expr: &syn::Expr) -> String {
             .elems
             .iter()
             .map(convert_expr_to_attr)
-            .collect::<Vec<_>>().join(" "),
+            .collect::<Vec<_>>()
+            .join(" "),
         syn::Expr::Lit(lit) => lit.to_token_stream().to_string(),
         syn::Expr::Path(p) => p.to_token_stream().to_string(),
         _ => "".to_string(),
@@ -248,6 +279,7 @@ fn convert_expr_to_attr(expr: &syn::Expr) -> String {
 
 fn op_to_func_name(op: &BinOp) -> syn::Ident {
     let name = match op {
+        BinOp::Eq(_) => "assign",
         BinOp::AddEq(_) => "add",
         BinOp::SubEq(_) => "sub",
         BinOp::MulEq(_) => "mul",
@@ -280,9 +312,9 @@ fn generate_expr(expr: &expr::CoreExpr, view_param: bool) -> TokenStream {
             let var_name = &binding.ident;
 
             if view_param {
-                quote! { self #dot #var_name.bind() }
+                quote! { _self #dot #var_name.bind() }
             } else {
-                quote! { _self #dot #var_name.value() }
+                quote! { _selfc #dot #var_name.value() }
             }
         }
         expr::CoreExpr::Assignment(expr::Assignment { left, op, right }) => {
@@ -291,7 +323,7 @@ fn generate_expr(expr: &expr::CoreExpr, view_param: bool) -> TokenStream {
                     let op = op_to_func_name(op);
                     let var_name = &bind.ident;
 
-                    quote! { _self.#var_name.value_mut().#op(#exp) }
+                    quote! { _selfc.#var_name.value_mut().#op(#exp) }
                 }
                 _ => panic!("Unexpected assignment"),
             }
@@ -312,9 +344,9 @@ fn get_event_from_stmt(
 
     quote! {
         {
-            let _self = self.clone();
+            let _selfc = _self.clone();
             let cb: Closure<dyn FnMut(Event)> = Closure::new(move |_| {
-                let _self = Rc::clone(&_self);
+                let _selfc = Rc::clone(&_selfc);
                 {
                     #expr;
                 }
@@ -341,10 +373,10 @@ fn get_event(
 
     quote! {
         {
-            let _self = self.clone();
+            let _selfc = _self.clone();
             let cb: Closure<dyn FnMut(Event)> = Closure::new(move |_| {
-                let _self = Rc::clone(&_self);
-                _self #dot #func_ident()
+                let _selfc = Rc::clone(&_selfc);
+                _selfc #dot #func_ident()
             });
 
             #element.add_event_listener_with_callback(#event_name, &cb.as_ref().unchecked_ref())?;
@@ -388,9 +420,35 @@ fn walk_elements(index: &mut usize, parent: &Ident, element: &Element) -> TokenS
                     Vec::new()
                 };
 
+                let children = match &body {
+                    ElementBody::Elements { brace_token, body } => {
+                        if !body.is_empty() {
+                            let param_ident = syn::Ident::new("_parent", Span::call_site());
+
+                            let mut closure_toks = TokenStream::new();
+
+                            brace_token.surround(&mut closure_toks, |body_tokens| {
+                                for element in body {
+                                    let sub_tokens = walk_elements(index, &param_ident, element);
+
+                                    body_tokens.extend(sub_tokens);
+                                }
+                                body_tokens.extend(quote!(Ok(())))
+                            });
+
+                            quote! {
+                               Some(|_self, document, #param_ident| -> Result<(), JsValue> #closure_toks)
+                            }
+                        } else {
+                            quote!(None)
+                        }
+                    }
+                    _ => quote!(None),
+                };
+
                 tokens.extend(quote! {
                     #let_token #ident = Rc::new(#struct_name::new(#(#args),*));
-                    #ident.on_init(document.clone(), &#parent)?;
+                    #ident.on_init(document.clone(), &#parent, #children)?;
                 });
 
                 return tokens;
@@ -402,7 +460,12 @@ fn walk_elements(index: &mut usize, parent: &Ident, element: &Element) -> TokenS
 
                 if let Some(args) = arguments {
                     for arg in &args.arguments {
-                        let name = arg.key.as_ref().expect("Expected named argument for element").0.to_string();
+                        let name = arg
+                            .key
+                            .as_ref()
+                            .expect("Expected named argument for element")
+                            .0
+                            .to_string();
 
                         if EVENTS.contains(name.as_str()) {
                             let name = syn::LitStr::new(name.as_str(), Span::call_site());
@@ -523,9 +586,9 @@ fn walk_elements(index: &mut usize, parent: &Ident, element: &Element) -> TokenS
             for value in &var_buf {
                 if value.starts_with('$') {
                     let var_name = syn::Ident::new(&value[1..], Span::call_site());
-                    vars.push(quote! {self.#var_name.value()});
+                    vars.push(quote! {_self.#var_name.value()});
 
-                    re_fmt_vars.push(quote! {_self.#var_name.value()});
+                    re_fmt_vars.push(quote! {_selfc.#var_name.value()});
                 } else {
                     let var_name = syn::Ident::new(value, Span::call_site());
                     vars.push(quote! {#var_name});
@@ -544,9 +607,9 @@ fn walk_elements(index: &mut usize, parent: &Ident, element: &Element) -> TokenS
                         syn::Ident::new(&format!("{}_clone", bind.to_string()), Span::call_site());
 
                     subscribers.push(quote! {
-                        let _self = self.clone();
+                        let _selfc = _self.clone();
                         let #new_name = #bind.clone();
-                        self.#var_name.subscribe(move |value| {
+                        _self.#var_name.subscribe(move |value| {
                             #re_format
                             #new_name.set_text_content(Some(&content));
                         });
@@ -560,6 +623,13 @@ fn walk_elements(index: &mut usize, parent: &Ident, element: &Element) -> TokenS
                 { #parent.append_child(&#bind.get_root_node())?; }
                 #(#subscribers)*
             });
+        },
+        Element::Include { name, .. } => {
+            tokens.extend(quote! {
+                if let Some(view) = &#name {
+                    view (&_self, &document, &#parent)?;
+                }
+            })
         }
     }
 
@@ -572,6 +642,8 @@ pub fn view(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
         decl_token,
         name,
         elements,
+        generics,
+        generic_params,
         ..
     } = parse_macro_input!(input as View);
 
@@ -581,6 +653,7 @@ pub fn view(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
 
     let mut index = 0;
     let mut tokens = Vec::new();
+    let element_len = elements.len();
 
     for element in &elements {
         let sub_tokens = walk_elements(
@@ -603,14 +676,15 @@ pub fn view(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
         use wasm_bindgen::prelude::*;
         use web_sys::Event;
 
-        #impl_tok #name {
-            pub fn on_init(self: Rc<Self>, document: Rc<tsz::html::Document>, parent: &tsz::html::Element) -> Result<(), JsValue> {
+        #impl_tok #generics #name #generic_params {
+            pub fn on_init(self: Rc<Self>, document: Rc<tsz::html::Document>, parent: &tsz::html::Element, children: Option<fn (&Rc<Self>, &Rc<tsz::html::Document>, &tsz::html::Element) -> Result<(), JsValue>>) -> Result<[tsz::html::Element; #element_len], JsValue> {
                 // let Self { value } = self;
                 let __body = document.body().expect("Unable to get document body");
+                let _self = self;
 
                 #(#tokens);*
 
-                Ok(())
+                Ok([])
             }
         }
     };

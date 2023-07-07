@@ -1,6 +1,63 @@
-use syn::{parse::Parse, BinOp, Expr};
+use syn::{parse::Parse, Expr};
 
 use crate::syn_macros::*;
+
+ast_enum! {
+    pub enum BinOp {
+        /// The `=` operator
+        Eq(syn::Token![=]),
+        /// The `+=` operator
+        AddEq(syn::Token![+=]),
+        /// The `-=` operator
+        SubEq(syn::Token![-=]),
+        /// The `*=` operator
+        MulEq(syn::Token![*=]),
+        /// The `/=` operator
+        DivEq(syn::Token![/=]),
+        /// The `%=` operator
+        RemEq(syn::Token![%=]),
+        /// The `^=` operator
+        BitXorEq(syn::Token![^=]),
+        /// The `&=` operator
+        BitAndEq(syn::Token![&=]),
+        /// The `|=` operator
+        BitOrEq(syn::Token![|=]),
+        /// The `<<=` operator
+        ShlEq(syn::Token![<<=]),
+        /// The `>>=` operator
+        ShrEq(syn::Token![>>=]),
+    }
+}
+
+impl Parse for BinOp {
+    fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
+        if input.peek(syn::Token![=]) {
+            input.parse().map(BinOp::Eq)
+        } else if input.peek(syn::Token![+=]) {
+            input.parse().map(BinOp::AddEq)
+        } else if input.peek(syn::Token![-=]) {
+            input.parse().map(BinOp::SubEq)
+        } else if input.peek(syn::Token![*=]) {
+            input.parse().map(BinOp::MulEq)
+        } else if input.peek(syn::Token![/=]) {
+            input.parse().map(BinOp::DivEq)
+        } else if input.peek(syn::Token![%=]) {
+            input.parse().map(BinOp::RemEq)
+        } else if input.peek(syn::Token![^=]) {
+            input.parse().map(BinOp::BitXorEq)
+        } else if input.peek(syn::Token![&=]) {
+            input.parse().map(BinOp::BitAndEq)
+        } else if input.peek(syn::Token![|=]) {
+            input.parse().map(BinOp::BitOrEq)
+        } else if input.peek(syn::Token![<<=]) {
+            input.parse().map(BinOp::ShlEq)
+        } else if input.peek(syn::Token![>>=]) {
+            input.parse().map(BinOp::ShrEq)
+        } else {
+            Err(input.error("expected binary operator"))
+        }
+    }
+}
 
 ast_enum_of_structs! {
     pub enum CoreExpr {
@@ -25,7 +82,8 @@ impl Parse for CoreExpr {
         };
 
         // let expr = input.parse()?;
-        if input.peek(syn::Token![+=])
+        if input.peek(syn::Token![=])
+            || input.peek(syn::Token![+=])
             || input.peek(syn::Token![-=])
             || input.peek(syn::Token![*=])
             || input.peek(syn::Token![/=])

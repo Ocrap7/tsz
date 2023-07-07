@@ -16,6 +16,7 @@ tsz::view! {
     declare SubView;
 
     div {
+        #children
         "SubView test {$sub_value}"
     }
 }
